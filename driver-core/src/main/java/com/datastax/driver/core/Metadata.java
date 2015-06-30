@@ -20,14 +20,13 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Pattern;
 
 import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import com.datastax.driver.core.exceptions.DriverInternalError;
 
@@ -36,14 +35,14 @@ import com.datastax.driver.core.exceptions.DriverInternalError;
  */
 public class Metadata {
 
-    private static final Logger logger = LoggerFactory.getLogger(Metadata.class);
-
     final Cluster.Manager cluster;
     volatile String clusterName;
     volatile String partitioner;
     private final ConcurrentMap<InetSocketAddress, Host> hosts = new ConcurrentHashMap<InetSocketAddress, Host>();
     final ConcurrentMap<String, KeyspaceMetadata> keyspaces = new ConcurrentHashMap<String, KeyspaceMetadata>();
     volatile TokenMap tokenMap;
+
+    final ReentrantLock lock = new ReentrantLock();
 
     private static final Pattern cqlId = Pattern.compile("\\w+");
     private static final Pattern lowercaseId = Pattern.compile("[a-z][a-z0-9_]*");
@@ -52,17 +51,22 @@ public class Metadata {
         this.cluster = cluster;
     }
 
-    synchronized void rebuildTokenMap(String partitioner, Map<Host, Collection<String>> allTokens) {
-        if (allTokens.isEmpty())
-            return;
+    void rebuildTokenMap(String partitioner, Map<Host, Collection<String>> allTokens) {
+        lock.lock();
+        try {
+            if (allTokens.isEmpty())
+                return;
 
-        Token.Factory factory = partitioner == null
-                              ? (tokenMap == null ? null : tokenMap.factory)
-                              : Token.getFactory(partitioner);
-        if (factory == null)
-            return;
+            Token.Factory factory = partitioner == null
+                ? (tokenMap == null ? null : tokenMap.factory)
+                : Token.getFactory(partitioner);
+            if (factory == null)
+                return;
 
-        this.tokenMap = TokenMap.build(factory, allTokens, keyspaces.values());
+            this.tokenMap = TokenMap.build(factory, allTokens, keyspaces.values());
+        } finally {
+            lock.unlock();
+        }
     }
 
     Host add(InetSocketAddress address) {

@@ -101,70 +101,75 @@ abstract class SchemaParser {
             Map<String, List<Row>> functionDefs = groupByKeyspace(get(functionsFuture));
             Map<String, List<Row>> aggregateDefs = groupByKeyspace(get(aggregatesFuture));
 
-            if (targetType == null || targetType == KEYSPACE) { // Refresh one or all keyspaces
-                assert ks != null;
-                Set<String> addedKs = new HashSet<String>();
-                for (Row ksRow : ks) {
-                    String ksName = ksRow.getString(KeyspaceMetadata.KS_NAME);
-                    KeyspaceMetadata ksm = KeyspaceMetadata.buildV2(ksRow);
+            metadata.lock.lock();
+            try {
+                if (targetType == null || targetType == KEYSPACE) { // Refresh one or all keyspaces
+                    assert ks != null;
+                    Set<String> addedKs = new HashSet<String>();
+                    for (Row ksRow : ks) {
+                        String ksName = ksRow.getString(KeyspaceMetadata.KS_NAME);
+                        KeyspaceMetadata ksm = KeyspaceMetadata.buildV2(ksRow);
 
-                    if (udtDefs.containsKey(ksName)) {
-                        buildUserTypes(ksm, udtDefs.get(ksName));
+                        if (udtDefs.containsKey(ksName)) {
+                            buildUserTypes(ksm, udtDefs.get(ksName));
+                        }
+                        if (cfDefs.containsKey(ksName)) {
+                            buildTableMetadata(ksm, cfDefs.get(ksName), colsDefs.get(ksName), cassandraVersion, CF_NAME);
+                        }
+                        if (functionDefs.containsKey(ksName)) {
+                            buildFunctionMetadata(ksm, functionDefs.get(ksName));
+                        }
+                        if (aggregateDefs.containsKey(ksName)) {
+                            buildAggregateMetadata(ksm, aggregateDefs.get(ksName), protocolVersion);
+                        }
+                        addedKs.add(ksName);
+                        metadata.keyspaces.put(ksName, ksm);
                     }
-                    if (cfDefs.containsKey(ksName)) {
-                        buildTableMetadata(ksm, cfDefs.get(ksName), colsDefs.get(ksName), cassandraVersion, CF_NAME);
-                    }
-                    if (functionDefs.containsKey(ksName)) {
-                        buildFunctionMetadata(ksm, functionDefs.get(ksName));
-                    }
-                    if (aggregateDefs.containsKey(ksName)) {
-                        buildAggregateMetadata(ksm, aggregateDefs.get(ksName), protocolVersion);
-                    }
-                    addedKs.add(ksName);
-                    metadata.keyspaces.put(ksName, ksm);
-                }
 
-                // If keyspace is null, it means we're rebuilding from scratch, so
-                // remove anything that was not just added as it means it's a dropped keyspace
-                if (targetKeyspace == null) {
-                    Iterator<String> iter = metadata.keyspaces.keySet().iterator();
-                    while (iter.hasNext()) {
-                        if (!addedKs.contains(iter.next()))
-                            iter.remove();
+                    // If keyspace is null, it means we're rebuilding from scratch, so
+                    // remove anything that was not just added as it means it's a dropped keyspace
+                    if (targetKeyspace == null) {
+                        Iterator<String> iter = metadata.keyspaces.keySet().iterator();
+                        while (iter.hasNext()) {
+                            if (!addedKs.contains(iter.next()))
+                                iter.remove();
+                        }
+                    }
+                } else {
+                    assert targetKeyspace != null;
+                    KeyspaceMetadata ksm = metadata.keyspaces.get(targetKeyspace);
+
+                    // If we update a keyspace we don't know about, something went
+                    // wrong. Log an error an schedule a full schema rebuilt.
+                    if (ksm == null) {
+                        logger.error(String.format("Asked to rebuild %s %s.%s but I don't know keyspace %s", targetType, targetKeyspace, targetName, targetKeyspace));
+                        metadata.cluster.submitSchemaRefresh(null, null, null, null);
+                        return;
+                    }
+
+                    switch (targetType) {
+                        case TABLE:
+                            if (cfDefs.containsKey(targetKeyspace))
+                                buildTableMetadata(ksm, cfDefs.get(targetKeyspace), colsDefs.get(targetKeyspace), cassandraVersion, CF_NAME);
+                            break;
+                        case TYPE:
+                            if (udtDefs.containsKey(targetKeyspace))
+                                buildUserTypes(ksm, udtDefs.get(targetKeyspace));
+                            break;
+                        case FUNCTION:
+                            if (functionDefs.containsKey(targetKeyspace))
+                                buildFunctionMetadata(ksm, functionDefs.get(targetKeyspace));
+                            break;
+                        case AGGREGATE:
+                            if (functionDefs.containsKey(targetKeyspace))
+                                buildAggregateMetadata(ksm, aggregateDefs.get(targetKeyspace), protocolVersion);
+                            break;
+                        default:
+                            logger.warn("Unexpected element type to rebuild: {}", targetType);
                     }
                 }
-            } else {
-                assert targetKeyspace != null;
-                KeyspaceMetadata ksm = metadata.keyspaces.get(targetKeyspace);
-
-                // If we update a keyspace we don't know about, something went
-                // wrong. Log an error an schedule a full schema rebuilt.
-                if (ksm == null) {
-                    logger.error(String.format("Asked to rebuild %s %s.%s but I don't know keyspace %s", targetType, targetKeyspace, targetName, targetKeyspace));
-                    metadata.cluster.submitSchemaRefresh(null, null, null, null);
-                    return;
-                }
-
-                switch (targetType) {
-                    case TABLE:
-                        if (cfDefs.containsKey(targetKeyspace))
-                            buildTableMetadata(ksm, cfDefs.get(targetKeyspace), colsDefs.get(targetKeyspace), cassandraVersion, CF_NAME);
-                        break;
-                    case TYPE:
-                        if (udtDefs.containsKey(targetKeyspace))
-                            buildUserTypes(ksm, udtDefs.get(targetKeyspace));
-                        break;
-                    case FUNCTION:
-                        if (functionDefs.containsKey(targetKeyspace))
-                            buildFunctionMetadata(ksm, functionDefs.get(targetKeyspace));
-                        break;
-                    case AGGREGATE:
-                        if (functionDefs.containsKey(targetKeyspace))
-                            buildAggregateMetadata(ksm, aggregateDefs.get(targetKeyspace), protocolVersion);
-                        break;
-                    default:
-                        logger.warn("Unexpected element type to rebuild: {}", targetType);
-                }
+            } finally {
+                metadata.lock.unlock();
             }
         }
 
@@ -242,73 +247,77 @@ abstract class SchemaParser {
             Map<String, List<Row>> functionDefs = groupByKeyspace(get(functionsFuture));
             Map<String, List<Row>> aggregateDefs = groupByKeyspace(get(aggregatesFuture));
 
-            if (targetType == null || targetType == KEYSPACE) { // Refresh one or all keyspaces
-                assert ks != null;
-                Set<String> addedKs = new HashSet<String>();
-                for (Row ksRow : ks) {
-                    String ksName = ksRow.getString(KeyspaceMetadata.KS_NAME);
-                    KeyspaceMetadata ksm = KeyspaceMetadata.buildV3(ksRow);
+            metadata.lock.lock();
+            try {
+                if (targetType == null || targetType == KEYSPACE) { // Refresh one or all keyspaces
+                    assert ks != null;
+                    Set<String> addedKs = new HashSet<String>();
+                    for (Row ksRow : ks) {
+                        String ksName = ksRow.getString(KeyspaceMetadata.KS_NAME);
+                        KeyspaceMetadata ksm = KeyspaceMetadata.buildV3(ksRow);
 
-                    if (udtDefs.containsKey(ksName)) {
-                        buildUserTypes(ksm, udtDefs.get(ksName));
+                        if (udtDefs.containsKey(ksName)) {
+                            buildUserTypes(ksm, udtDefs.get(ksName));
+                        }
+                        if (cfDefs.containsKey(ksName)) {
+                            buildTableMetadata(ksm, cfDefs.get(ksName), colsDefs.get(ksName), cassandraVersion, TABLE_NAME);
+                        }
+                        if (functionDefs.containsKey(ksName)) {
+                            buildFunctionMetadata(ksm, functionDefs.get(ksName));
+                        }
+                        if (aggregateDefs.containsKey(ksName)) {
+                            buildAggregateMetadata(ksm, aggregateDefs.get(ksName), protocolVersion);
+                        }
+                        addedKs.add(ksName);
+                        metadata.keyspaces.put(ksName, ksm);
                     }
-                    if (cfDefs.containsKey(ksName)) {
-                        buildTableMetadata(ksm, cfDefs.get(ksName), colsDefs.get(ksName), cassandraVersion, TABLE_NAME);
-                    }
-                    if (functionDefs.containsKey(ksName)) {
-                        buildFunctionMetadata(ksm, functionDefs.get(ksName));
-                    }
-                    if (aggregateDefs.containsKey(ksName)) {
-                        buildAggregateMetadata(ksm, aggregateDefs.get(ksName), protocolVersion);
-                    }
-                    addedKs.add(ksName);
-                    metadata.keyspaces.put(ksName, ksm);
-                }
 
-                // If keyspace is null, it means we're rebuilding from scratch, so
-                // remove anything that was not just added as it means it's a dropped keyspace
-                if (targetKeyspace == null) {
-                    Iterator<String> iter = metadata.keyspaces.keySet().iterator();
-                    while (iter.hasNext()) {
-                        if (!addedKs.contains(iter.next()))
-                            iter.remove();
+                    // If keyspace is null, it means we're rebuilding from scratch, so
+                    // remove anything that was not just added as it means it's a dropped keyspace
+                    if (targetKeyspace == null) {
+                        Iterator<String> iter = metadata.keyspaces.keySet().iterator();
+                        while (iter.hasNext()) {
+                            if (!addedKs.contains(iter.next()))
+                                iter.remove();
+                        }
+                    }
+                } else {
+                    assert targetKeyspace != null;
+                    KeyspaceMetadata ksm = metadata.keyspaces.get(targetKeyspace);
+
+                    // If we update a keyspace we don't know about, something went
+                    // wrong. Log an error an schedule a full schema rebuilt.
+                    if (ksm == null) {
+                        logger.error(String.format("Asked to rebuild %s %s.%s but I don't know keyspace %s", targetType, targetKeyspace, targetName, targetKeyspace));
+                        metadata.cluster.submitSchemaRefresh(null, null, null, null);
+                        return;
+                    }
+
+                    switch (targetType) {
+                        case TABLE:
+                            if (cfDefs.containsKey(targetKeyspace))
+                                buildTableMetadata(ksm, cfDefs.get(targetKeyspace), colsDefs.get(targetKeyspace), cassandraVersion, TABLE_NAME);
+                            break;
+                        case TYPE:
+                            if (udtDefs.containsKey(targetKeyspace))
+                                buildUserTypes(ksm, udtDefs.get(targetKeyspace));
+                            break;
+                        case FUNCTION:
+                            if (functionDefs.containsKey(targetKeyspace))
+                                buildFunctionMetadata(ksm, functionDefs.get(targetKeyspace));
+                            break;
+                        case AGGREGATE:
+                            if (functionDefs.containsKey(targetKeyspace))
+                                buildAggregateMetadata(ksm, aggregateDefs.get(targetKeyspace), protocolVersion);
+                            break;
+                        default:
+                            logger.warn("Unexpected element type to rebuild: {}", targetType);
                     }
                 }
-            } else {
-                assert targetKeyspace != null;
-                KeyspaceMetadata ksm = metadata.keyspaces.get(targetKeyspace);
-
-                // If we update a keyspace we don't know about, something went
-                // wrong. Log an error an schedule a full schema rebuilt.
-                if (ksm == null) {
-                    logger.error(String.format("Asked to rebuild %s %s.%s but I don't know keyspace %s", targetType, targetKeyspace, targetName, targetKeyspace));
-                    metadata.cluster.submitSchemaRefresh(null, null, null, null);
-                    return;
-                }
-
-                switch (targetType) {
-                    case TABLE:
-                        if (cfDefs.containsKey(targetKeyspace))
-                            buildTableMetadata(ksm, cfDefs.get(targetKeyspace), colsDefs.get(targetKeyspace), cassandraVersion, TABLE_NAME);
-                        break;
-                    case TYPE:
-                        if (udtDefs.containsKey(targetKeyspace))
-                            buildUserTypes(ksm, udtDefs.get(targetKeyspace));
-                        break;
-                    case FUNCTION:
-                        if (functionDefs.containsKey(targetKeyspace))
-                            buildFunctionMetadata(ksm, functionDefs.get(targetKeyspace));
-                        break;
-                    case AGGREGATE:
-                        if (functionDefs.containsKey(targetKeyspace))
-                            buildAggregateMetadata(ksm, aggregateDefs.get(targetKeyspace), protocolVersion);
-                        break;
-                    default:
-                        logger.warn("Unexpected element type to rebuild: {}", targetType);
-                }
+            } finally {
+                metadata.lock.unlock();
             }
         }
-
     };
 
     static void buildTableMetadata(KeyspaceMetadata ksm, List<Row> cfRows, Map<String, Map<String, ColumnMetadata.Raw>> colsDefs, VersionNumber cassandraVersion, String tableName) {

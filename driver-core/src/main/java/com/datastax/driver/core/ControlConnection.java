@@ -319,12 +319,10 @@ class ControlConnection {
             cassandraVersion = host.getCassandraVersion();
         }
 
-        synchronized (cluster) {
-            SchemaParser.forVersion(cassandraVersion)
-                .refresh(cluster.metadata,
-                    targetType, targetKeyspace, targetName, targetSignature,
-                    connection, cassandraVersion);
-        }
+        SchemaParser.forVersion(cassandraVersion)
+            .refresh(cluster.metadata,
+                targetType, targetKeyspace, targetName, targetSignature,
+                connection, cassandraVersion);
 
         // If we rebuild all from scratch or have an updated keyspace, rebuild the token map since some replication on some keyspace
         // may have changed
