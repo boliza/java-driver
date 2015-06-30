@@ -39,7 +39,7 @@ public class AggregateMetadata {
     private final String stateFuncFullName;
     private final DataType stateType;
 
-    public AggregateMetadata(KeyspaceMetadata keyspace, String fullName, String simpleName, List<DataType> argumentTypes,
+    private AggregateMetadata(KeyspaceMetadata keyspace, String fullName, String simpleName, List<DataType> argumentTypes,
                              String finalFuncSimpleName, String finalFuncFullName, Object initCond, DataType returnType,
                              String stateFuncSimpleName, String stateFuncFullName, DataType stateType) {
         this.keyspace = keyspace;
@@ -67,7 +67,7 @@ public class AggregateMetadata {
     //     state_type text,
     //     PRIMARY KEY (keyspace_name, aggregate_name, signature)
     // ) WITH CLUSTERING ORDER BY (aggregate_name ASC, signature ASC)
-    static AggregateMetadata build(KeyspaceMetadata ksm, Row row, VersionNumber cassandraVersion, ProtocolVersion protocolVersion) {
+    static AggregateMetadata build(KeyspaceMetadata ksm, Row row, ProtocolVersion protocolVersion) {
         String simpleName = row.getString("aggregate_name");
         List<String> signature = row.getList("signature", String.class);
         String fullName = Metadata.fullFunctionName(simpleName, signature);

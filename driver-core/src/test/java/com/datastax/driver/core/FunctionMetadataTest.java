@@ -37,7 +37,7 @@ public class FunctionMetadataTest {
 
     @Test(groups = "unit")
     public void should_parse_and_format_simple_function() {
-        FunctionMetadata function = FunctionMetadata.build(keyspace, SYSTEM_ROW_PLUS, cassandraVersion);
+        FunctionMetadata function = FunctionMetadata.build(keyspace, SYSTEM_ROW_PLUS);
 
         assertThat(function).isNotNull();
         assertThat(function.getKeyspace()).isEqualTo(keyspace);
@@ -68,7 +68,7 @@ public class FunctionMetadataTest {
 
     @Test(groups = "unit")
     public void should_parse_and_format_function_with_no_arguments() {
-        FunctionMetadata function = FunctionMetadata.build(keyspace, SYSTEM_ROW_PI, cassandraVersion);
+        FunctionMetadata function = FunctionMetadata.build(keyspace, SYSTEM_ROW_PI);
 
         assertThat(function).isNotNull();
         assertThat(function.getKeyspace()).isEqualTo(keyspace);

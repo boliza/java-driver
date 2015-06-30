@@ -20,7 +20,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
-import com.google.common.base.Joiner;
 import com.google.common.collect.ImmutableMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -70,7 +69,7 @@ public class FunctionMetadata {
     //     return_type text,
     //     PRIMARY KEY (keyspace_name, function_name, signature)
     // ) WITH CLUSTERING ORDER BY (function_name ASC, signature ASC)
-    static FunctionMetadata build(KeyspaceMetadata ksm, Row row, VersionNumber cassandraVersion) {
+    static FunctionMetadata build(KeyspaceMetadata ksm, Row row) {
         String simpleName = row.getString("function_name");
         List<String> signature = row.getList("signature", String.class);
         String fullName = Metadata.fullFunctionName(simpleName, signature);

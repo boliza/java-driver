@@ -48,13 +48,6 @@ class ControlConnection {
         }
     }
 
-    private static final String SELECT_KEYSPACES = "SELECT * FROM system.schema_keyspaces";
-    private static final String SELECT_COLUMN_FAMILIES = "SELECT * FROM system.schema_columnfamilies";
-    private static final String SELECT_COLUMNS = "SELECT * FROM system.schema_columns";
-    private static final String SELECT_USERTYPES = "SELECT * FROM system.schema_usertypes";
-    private static final String SELECT_FUNCTIONS = "SELECT * FROM system.schema_functions";
-    private static final String SELECT_AGGREGATES = "SELECT * FROM system.schema_aggregates";
-
     private static final String SELECT_PEERS = "SELECT * FROM system.peers";
     private static final String SELECT_LOCAL = "SELECT * FROM system.local WHERE key='local'";
 

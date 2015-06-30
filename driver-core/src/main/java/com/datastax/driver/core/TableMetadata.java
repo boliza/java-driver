@@ -30,7 +30,6 @@ public class TableMetadata {
 
     private static final Logger logger = LoggerFactory.getLogger(TableMetadata.class);
 
-    static final String CF_NAME                      = "columnfamily_name";
     private static final String CF_ID                = "cf_id";
 
     private static final String KEY_VALIDATOR        = "key_validator";
@@ -98,9 +97,9 @@ public class TableMetadata {
         this.cassandraVersion = cassandraVersion;
     }
 
-    static TableMetadata build(KeyspaceMetadata ksm, Row row, Map<String, ColumnMetadata.Raw> rawCols, VersionNumber cassandraVersion) {
+    static TableMetadata build(KeyspaceMetadata ksm, Row row, Map<String, ColumnMetadata.Raw> rawCols, VersionNumber cassandraVersion, String tableName) {
 
-        String name = row.getString(CF_NAME);
+        String name = row.getString(tableName);
         UUID id = (cassandraVersion.getMajor() > 2 || (cassandraVersion.getMajor() == 2 && cassandraVersion.getMinor() >= 1))
                 ? row.getUUID(CF_ID)
                 : null;
@@ -187,7 +186,6 @@ public class TableMetadata {
         for (ColumnMetadata c : otherColumns)
             columns.put(c.getName(), c);
 
-        ksm.add(tm);
         return tm;
     }
 
